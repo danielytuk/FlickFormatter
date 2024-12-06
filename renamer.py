@@ -8,7 +8,8 @@ import requests
 import datetime
 from pathlib import Path
 
-# A BOAT LOAD OF KEYS
+# Configurations
+# Configuration dictionary to store multiple TMDB API keys for redundancy.
 CONFIG = {
     "TMDB_API_KEYS": [
         "516adf1e1567058f8ecbf30bf2eb9378",
@@ -43,39 +44,62 @@ CONFIG = {
     ]
 }
 
-# UTIL FUNCS FOR COLOURED OUTPUT
+# Utility functions for colored output
+# These functions provide colored terminal output for success, error, and info messages.
+
 def print_success(message):
+    """Print a success message in green."""
     print(f"\033[92m[SUCCESS]\033[0m {message}")
 
 def print_error(message):
+    """Print an error message in red."""
     print(f"\033[91m[ERROR]\033[0m {message}")
 
 def print_info(message):
+    """Print an informational message in blue."""
     print(f"\033[94m[INFO]\033[0m {message}")
 
-# RANDOM KEY
+# Get a random API key
 def get_random_api_key():
+    """Retrieve a random TMDB API key from the configuration."""
     return random.choice(CONFIG["TMDB_API_KEYS"])
 
-# EXT VAILDATION
+# File extension validation
+# List of allowed video file extensions for processing.
 ALLOWED_EXTENSIONS = {
     ".webm", ".mkv", ".flv", ".vob", ".ogv", ".ogg", ".mov", ".avi", ".qt", ".wmv",
     ".yuv", ".rm", ".asf", ".amv", ".mp4", ".m4p", ".m4v", ".mpg", ".mpeg", ".mpe",
     ".mpv", ".svi", ".3gp", ".3g2", ".mxf", ".roq", ".nsv", ".f4v", ".f4p", ".f4a", ".f4b"
 }
 
-# TV SHOW CHECK
+# Check if the file is a TV show
 def is_tv_show(filename):
+    """
+    Determine if a file name matches the pattern of a TV show episode.
+    Example pattern: S01E01 (Season 1, Episode 1).
+    """
     return bool(re.search(r"S\d{2}E\d{2}", filename, re.IGNORECASE))
 
-# SANITISE FILENAME
+# Sanitize filenames
 def sanitize_name(name, keep_special_characters=True):
+    """
+    Clean up and standardize file or folder names.
+    - Removes extra spaces, trailing dashes, or year information in parentheses.
+    - Optionally removes special characters.
+    """
     name = name.strip().rstrip('-').strip()
     name = re.sub(r"\s?\(\d{4}\)\s?-?$", "", name)  # Remove year in parentheses
-    return re.sub(r"[^\w\s]" if not keep_special_characters else r"\s+", " ", name).strip()
+    if not keep_special_characters:
+        name = re.sub(r"[^\w\s]", "", name)  # Remove special characters
+    name = re.sub(r"\s+", " ", name).strip()  # Replace multiple spaces with one
+    return name
 
-# UPDATE CREATION/MODIFICATION TO REL DATE
+# Update file creation and modification date
 def update_file_date(file_path, release_date):
+    """
+    Update the file's creation and modification date to match the release date.
+    - Uses `os.utime` to set the timestamps.
+    """
     try:
         date_obj = datetime.datetime.strptime(release_date, "%Y-%m-%d")
         mod_time = date_obj.timestamp()
@@ -84,19 +108,35 @@ def update_file_date(file_path, release_date):
     except Exception as e:
         print_error(f"Could not update file date: {e}")
 
-# RENAMER
+# Rename a file
 def rename_file(old_path, new_path, release_date=None):
+    """
+    Rename a file and optionally update its creation/modification date.
+    - Ensures the destination directory exists before renaming.
+    """
     try:
-        os.makedirs(os.path.dirname(new_path), exist_ok=True)
-        shutil.move(old_path, new_path)
+        # Convert paths to Path objects for consistent handling
+        old_path = Path(old_path)
+        new_path = Path(new_path)
+
+        # Ensure the destination directory exists
+        new_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Perform the file rename
+        shutil.move(str(old_path), str(new_path))
         print_success(f"Renamed: {old_path} -> {new_path}")
         if release_date:
             update_file_date(new_path, release_date)
     except Exception as e:
         print_error(f"Error renaming {old_path} -> {new_path}: {e}")
 
-# FETCH DETAILS TMDB
+# Fetch episode or movie details from TMDB
 def fetch_tmdb_data(endpoint, params):
+    """
+    Fetch data from the TMDB API.
+    - `endpoint`: API endpoint to query (e.g., "search/tv").
+    - `params`: Dictionary of query parameters.
+    """
     try:
         api_key = get_random_api_key()
         params["api_key"] = api_key
@@ -107,8 +147,13 @@ def fetch_tmdb_data(endpoint, params):
         print_error(f"TMDB API error: {e}")
         return None
 
-# Fetch EP.NAME & REL DATE
+# Fetch episode name and release date
 def fetch_episode_details(show_name, season, episode):
+    """
+    Retrieve episode details (name and air date) from TMDB.
+    - First, searches for the TV show by name.
+    - Then, fetches specific episode details.
+    """
     search_data = fetch_tmdb_data("search/tv", {"query": sanitize_name(show_name, False)})
     if not search_data or not search_data.get("results"):
         print_error(f"Show not found: {show_name}")
@@ -120,8 +165,14 @@ def fetch_episode_details(show_name, season, episode):
         return episode_data.get("name"), episode_data.get("air_date")
     return None, None
 
-# PROCESS TV
+# Handle TV show files
 def process_tv_show(file_name, file_path, file_ext, save_path):
+    """
+    Process TV show files:
+    - Extract show name, season, and episode number from the file name.
+    - Fetch episode details from TMDB.
+    - Rename the file in a standardized format and organize it into folders.
+    """
     match = re.match(r"(.*?)[. ]S(\d{2})E(\d{2})", file_name, re.IGNORECASE)
     if not match:
         return
@@ -129,56 +180,90 @@ def process_tv_show(file_name, file_path, file_ext, save_path):
     show_name, season, episode = match.groups()
     episode_name, release_date = fetch_episode_details(show_name, season, episode)
     episode_name = episode_name or f"Episode {episode}"
+
+    # Sanitize episode name and construct new path
+    episode_name = sanitize_name(episode_name, keep_special_characters=False)
     new_name = f"S{season}E{episode} - {episode_name}{file_ext}"
 
-    show_folder = os.path.join(save_path, sanitize_name(show_name))
-    season_folder = os.path.join(show_folder, f"Season {int(season)}")
-    new_path = os.path.join(season_folder, new_name)
+    show_folder = Path(save_path) / sanitize_name(show_name)
+    season_folder = show_folder / f"Season {int(season)}"
+    new_path = season_folder / new_name
 
     rename_file(file_path, new_path, release_date)
 
-# PROCESS MOVIE
+# Handle movie files
 def process_movie(file_name, file_path, file_ext, save_path):
+    """
+    Process movie files:
+    - Sanitize the movie name.
+    - Rename and move the file to the save path.
+    """
     sanitized_name = sanitize_name(file_name, keep_special_characters=False)
     new_name = f"{sanitized_name}{file_ext}"
-    new_path = os.path.join(save_path, new_name)
+    new_path = Path(save_path) / new_name
     rename_file(file_path, new_path)
 
-# START RENAMING
-def rename_files(base_path, save_path):
-    if not base_path:
-        print_error("No folder selected.")
-        return
+# Process files
+def rename_files(file_paths, save_path):
+    """
+    Process a list of files:
+    - Identify whether each file is a TV show or a movie.
+    - Rename and organize the files accordingly.
+    """
+    for file_path in file_paths:
+        file_path = Path(file_path)
+        file_name, file_ext = file_path.stem, file_path.suffix
 
-    for root_dir, _, files in os.walk(base_path):
-        for file in files:
-            file_path = os.path.join(root_dir, file)
-            file_name, file_ext = os.path.splitext(file)
-
-            if file_ext.lower() in ALLOWED_EXTENSIONS:
-                if is_tv_show(file_name):
-                    process_tv_show(file_name, file_path, file_ext, save_path)
-                else:
-                    process_movie(file_name, file_path, file_ext, save_path)
+        if file_ext.lower() in ALLOWED_EXTENSIONS:
+            if is_tv_show(file_name):
+                process_tv_show(file_name, str(file_path), file_ext, save_path)
+            else:
+                process_movie(file_name, str(file_path), file_ext, save_path)
 
     print_success("Renaming completed!")
 
-# FOLDER SELC w/TKINTER
-def select_folder():
+# Folder selection using Tkinter
+def select_files_or_folder():
+    """
+    Use Tkinter to allow the user to select files or a directory for processing.
+    Returns the selected file paths or folder path.
+    """
     root = tk.Tk()
     root.withdraw()
-    return filedialog.askdirectory(title="Select Folder with Files to Rename")
 
+    while True:
+        print_info("Enter the option you want:\n\n> 1: Select files.\n> 2: Select directory.")
+        choice = input("> ").strip()
+
+        if choice == "1":
+            file_paths = filedialog.askopenfilenames(title="Select Files")
+            return list(file_paths), None
+        elif choice == "2":
+            folder_path = filedialog.askdirectory(title="Select Directory")
+            return None, folder_path
+        else:
+            print_error("Invalid input. Please enter 1 or 2.")
+
+# Main function
 def main():
-    print_info("Select the folder containing your media files.")
-    base_path = select_folder()
-    if not base_path:
-        print_error("No folder selected. Exiting.")
-        return
+    """
+    Main entry point for the program:
+    - Handles user input for selecting files or folders.
+    - Processes and renames the selected files.
+    """
+    print_info("Welcome to FlickFormatter!")
+    file_paths, folder_path = select_files_or_folder()
 
-    save_path = base_path
-    print_info(f"Processing files in: {base_path}")
-    rename_files(base_path, save_path)
+    if file_paths:
+        save_path = Path(file_paths[0]).parent  # Use the folder of the selected files
+        print_info(f"Processing files: {file_paths}")
+        rename_files(file_paths, save_path)
+    elif folder_path:
+        print_info(f"Processing directory: {folder_path}")
+        rename_files(Path(folder_path).rglob("*"), folder_path)  # Recursive search
+    else:
+        print_error("No files or folder selected. Exiting.")
 
+# Run the program
 if __name__ == "__main__":
     main()
