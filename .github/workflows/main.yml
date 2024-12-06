@@ -26,7 +26,7 @@ jobs:
 
     - name: Build EXE
       run: |
-        pyinstaller --onefile --name "FlickFormatter" src/renamer.py
+        pyinstaller --onefile --name "FlickFormatter" renamer.py
 
     - name: Upload EXE
       uses: actions/upload-artifact@v3
