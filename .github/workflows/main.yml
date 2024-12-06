@@ -31,5 +31,72 @@ jobs:
     - name: Upload EXE
       uses: actions/upload-artifact@v3
       with:
-        name: Python-EXE
+        name: FlickFormatter
         path: dist/FlickFormatter.exe
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+
+    - name: Set up Git
+      run: |
+        git config --global user.name "github-actions"
+        git config --global user.email "github-actions@github.com"
+
+    - name: Get latest tag
+      id: tag
+      run: |
+        latest_tag=$(git describe --tags --abbrev=0)
+        echo "Latest tag: $latest_tag"
+        echo "latest_tag=$latest_tag" >> $GITHUB_ENV
+
+    - name: Increment version tag
+      id: new_tag
+      run: |
+        # Check if the latest tag is 'v1' or similar (i.e., it only has the major version)
+        if [[ "$latest_tag" == "v1" ]]; then
+          # Treat it as v1.0.0 and increment to v1.0.1
+          new_version="v1.0.1"
+        else
+          # Otherwise, process normally
+          version="${latest_tag//v/}"
+          major=$(echo $version | cut -d. -f1)
+          minor=$(echo $version | cut -d. -f2)
+          patch=$(echo $version | cut -d. -f3)
+          
+          # Increment the patch version
+          new_patch=$((patch + 1))
+          new_version="v$major.$minor.$new_patch"
+        fi
+        echo "New version: $new_version"
+        echo "new_version=$new_version" >> $GITHUB_ENV
+
+    - name: Create new tag and release
+      run: |
+        git tag $new_version
+        git push origin $new_version
+
+    - name: Generate changelog from commit messages
+      id: changelog
+      run: |
+        # Collect commit messages since the last tag
+        changelog=$(git log $latest_tag..HEAD --pretty=format:"%s%n%n%b")
+        echo "Changelog: $changelog"
+        echo "changelog=$changelog" >> $GITHUB_ENV
+
+    - name: Create Release on GitHub
+      uses: softprops/action-gh-release@v1
+      with:
+        files: dist/FlickFormatter.exe
+        tag_name: ${{ env.new_version }}
+        release_name: ${{ env.new_version }}
+        body: |
+          ## Changelog:
+          ${{ env.changelog }}
+
+    - name: Clean up
+      run: |
+        rm -rf dist
